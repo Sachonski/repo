@@ -492,11 +492,11 @@ export default function App() {
               <th className="p-4 text-center bg-blue-900">Total</th>
 
               {/* 🔥 FULL MONTH — NO SLICE */}
-              {monthDates.map(d => (
-                <th key={d} className="p-4 text-center min-w-[50px]">
-                  {new Date(d).getDate()}
-                </th>
-              ))}
+             {monthDates.map(d => (
+  <th key={d} className="p-4 text-center min-w-[50px]">
+    {Number(d.split('-')[2])}
+  </th>
+))}
             </tr>
           </thead>
 
