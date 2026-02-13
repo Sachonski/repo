@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
-import { increment } from "firebase/firestore";
 import { 
   getFirestore, 
   doc, 
   setDoc, 
   onSnapshot, 
-  collection 
+  collection,
+  increment 
 } from 'firebase/firestore';
 import { 
   getAuth, 
@@ -180,7 +180,7 @@ export default function App() {
     return () => unsub();
   }, [user]);
 
-  // --- GHL Contact Fetching Logic (Enhanced for Search) ---
+  // --- GHL Contact Fetching Logic ---
   const fetchGHLContacts = useCallback(async (searchQuery = '') => {
     setLoadingContacts(true);
     try {
@@ -191,7 +191,6 @@ export default function App() {
         locationId = payload.location_id;
       }
 
-      // If query is provided, use the 'query' param; else just get 100 recent
       const url = searchQuery 
         ? `https://rest.gohighlevel.com/v1/contacts/?locationId=${locationId}&query=${encodeURIComponent(searchQuery)}&limit=100`
         : `https://rest.gohighlevel.com/v1/contacts/?locationId=${locationId}&limit=100`;
@@ -216,23 +215,20 @@ export default function App() {
       setLeads(mapped);
     } catch (err) {
       console.error("Error fetching GHL contacts:", err);
-      // Fallback to empty leads on error if we don't have mock data logic here
     } finally {
       setLoadingContacts(false);
     }
   }, []);
 
-  // Initial load
   useEffect(() => {
     if (user) fetchGHLContacts();
   }, [user, fetchGHLContacts]);
 
-  // Debounced search logic
   useEffect(() => {
     if (!user) return;
     const timer = setTimeout(() => {
       fetchGHLContacts(queryText);
-    }, 500); // Wait 500ms after last keystroke to search GHL
+    }, 500);
     return () => clearTimeout(timer);
   }, [queryText, user, fetchGHLContacts]);
 
@@ -308,7 +304,7 @@ export default function App() {
   }, [dailyStats, currentRep, monthDates]);
 
   return (
-    <div className="h-screen flex flex-col bg-[#F8FAFC] text-slate-900 font-sans text-[10px]">
+    <div className="h-screen flex flex-col bg-[#F8FAFC] text-slate-900 font-sans text-[10px] pt-[40px]">
       <header className="h-14 bg-white border-b border-slate-200 px-6 flex items-center justify-between z-50 shadow-sm shrink-0">
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-2">
@@ -359,9 +355,6 @@ export default function App() {
                     onChange={e => setQueryText(e.target.value)} 
                   />
                 </div>
-                {queryText && !loadingContacts && leads.length === 0 && (
-                   <p className="text-[8px] font-bold text-orange-600 uppercase text-center">No matches found in GHL</p>
-                )}
               </div>
               
               <div className="flex-1 overflow-y-auto">
