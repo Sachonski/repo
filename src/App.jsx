@@ -122,10 +122,12 @@ const getDaysInCurrentMonth = () => {
   const year = now.getFullYear();
   const month = now.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+
   const dates = [];
-  for (let i = 1; i <= daysInMonth; i++) {
-    const d = new Date(year, month, i);
-    dates.push(d.toISOString().split('T')[0]);
+  for (let day = 1; day <= daysInMonth; day++) {
+    const mm = String(month + 1).padStart(2, '0');
+    const dd = String(day).padStart(2, '0');
+    dates.push(`${year}-${mm}-${dd}`); // local-stable YYYY-MM-DD
   }
   return dates;
 };
@@ -220,9 +222,16 @@ export default function App() {
   }, [queryText, user, fetchGHLContacts]);
 
   const updateMetric = async (metricId, delta) => {
+    const getLocalDateKey = () => {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
     if (!user || !selectedLeadId) return;
     setIsSaving(true);
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateKey();
     const dailyId = `${today}_${currentRep}`;
     try {
       const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
@@ -236,11 +245,18 @@ export default function App() {
   };
 
   const handleClose = async () => {
+    const getLocalDateKey = () => {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
     if (!transaction.product || !transaction.cash || !selectedLeadId || !user) return;
     setIsSaving(true);
     try {
       const prod = PRODUCTS.find(p => p.id === transaction.product);
-      const today = new Date().toISOString().split('T')[0];
+      const today = getLocalDateKey();
       const dailyId = `${today}_${currentRep}`;
       const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
       const contactRef = doc(db, 'artifacts', appId, 'public', 'data', 'contact_stats', selectedLeadId);
