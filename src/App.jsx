@@ -4,6 +4,8 @@ import {
   getFirestore, 
   doc, 
   setDoc, 
+  addDoc,
+  deleteDoc, // Added deleteDoc
   onSnapshot, 
   collection,
   increment,
@@ -37,7 +39,9 @@ import {
   UserPlus,
   BarChart4,
   Percent,
-  Coins
+  Coins,
+  History,
+  Trash2 // Added Trash2 icon
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -146,6 +150,7 @@ export default function App() {
   const [currentRep, setCurrentRep] = useState(REPS[0]);
   const [dailyStats, setDailyStats] = useState({});
   const [contactStats, setContactStats] = useState({});
+  const [activityLogs, setActivityLogs] = useState([]);
   const [leads, setLeads] = useState([]);
   const [selectedLeadId, setSelectedLeadId] = useState(null);
   const [queryText, setQueryText] = useState('');
@@ -196,6 +201,19 @@ export default function App() {
     return () => unsub();
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+    const logsRef = collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs');
+    const unsub = onSnapshot(logsRef, (snapshot) => {
+      const logs = [];
+      snapshot.docs.forEach(doc => { logs.push({ id: doc.id, ...doc.data() }); });
+      // Sort by timestamp desc in memory
+      logs.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+      setActivityLogs(logs);
+    }, (err) => console.error("Logs Sync Error:", err));
+    return () => unsub();
+  }, [user]);
+
   const fetchGHLContacts = useCallback(async (searchQuery = '') => {
     setLoadingContacts(true);
     try {
@@ -232,6 +250,22 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [queryText, user, fetchGHLContacts]);
 
+  const logActivity = async (message, type, meta) => {
+    if (!selectedLeadId) return;
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs'), {
+        contactId: selectedLeadId,
+        contactName: selectedLead?.name || 'Unknown',
+        rep: currentRep,
+        date: selectedDate,
+        message,
+        type,
+        meta,
+        timestamp: new Date().toISOString()
+      });
+    } catch(e) { console.error("Logging Error", e); }
+  };
+
   const updateMetric = async (metricId, delta) => {
     if (!user || !selectedLeadId) return;
     setIsSaving(true);
@@ -240,9 +274,14 @@ export default function App() {
     try {
       const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
       const contactRef = doc(db, 'artifacts', appId, 'public', 'data', 'contact_stats', selectedLeadId);
+      
+      const metricLabel = KPI_GROUPS.FUNNEL.find(k => k.id === metricId)?.label || metricId;
+      const logMsg = `${currentRep} marked ${metricLabel} (${delta > 0 ? '+1' : '-1'})`;
+
       await Promise.all([
         setDoc(dailyRef, { date: selectedDate, rep: currentRep, metrics: { [metricId]: increment(delta) } }, { merge: true }),
-        setDoc(contactRef, { metrics: { [metricId]: increment(delta) } }, { merge: true })
+        setDoc(contactRef, { metrics: { [metricId]: increment(delta) } }, { merge: true }),
+        logActivity(logMsg, 'kpi', { metricId, delta, date: selectedDate, rep: currentRep })
       ]);
     } catch (err) { console.error("Metric Error:", err); }
     finally { setIsSaving(false); }
@@ -264,13 +303,72 @@ export default function App() {
           total_collected: increment(Number(transaction.cash))
         }
       };
+      const logMsg = `${currentRep} closed ${prod?.name || 'Item'} ($${transaction.cash} collected)`;
+
       await Promise.all([
         setDoc(dailyRef, { ...payload, date: selectedDate, rep: currentRep }, { merge: true }),
-        setDoc(contactRef, payload, { merge: true })
+        setDoc(contactRef, payload, { merge: true }),
+        logActivity(logMsg, 'sale', { revenue: prod?.price || 0, collected: Number(transaction.cash), date: selectedDate, rep: currentRep })
       ]);
       setTransaction({ product: '', cash: '' });
     } catch (err) { console.error("Transaction Error:", err); } 
     finally { setIsSaving(false); }
+  };
+
+  const handleDeleteLog = async (log) => {
+    if (!log.meta || !user) return;
+    // Basic confirmation can be improved with a custom modal if needed
+    // but standard browser confirm works well for safety here
+    if (!window.confirm("Are you sure? This will revert the statistics associated with this log.")) return;
+    
+    setIsSaving(true);
+    try {
+       // 1. Delete the log entry
+       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'activity_logs', log.id));
+
+       // 2. Revert the changes based on type
+       const { type, meta, contactId } = log;
+       
+       if (type === 'kpi') {
+          const { metricId, delta, date, rep } = meta;
+          // Reverse delta
+          const reverseDelta = delta * -1;
+          const dailyId = `${date}_${rep}`;
+          
+          const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
+          const contactRef = doc(db, 'artifacts', appId, 'public', 'data', 'contact_stats', contactId);
+
+          await Promise.all([
+             setDoc(dailyRef, { metrics: { [metricId]: increment(reverseDelta) } }, { merge: true }),
+             setDoc(contactRef, { metrics: { [metricId]: increment(reverseDelta) } }, { merge: true })
+          ]);
+
+       } else if (type === 'sale') {
+          const { revenue, collected, date, rep } = meta;
+          const dailyId = `${date}_${rep}`;
+          
+          const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
+          const contactRef = doc(db, 'artifacts', appId, 'public', 'data', 'contact_stats', contactId);
+          
+          const revertPayload = {
+            metrics: {
+               closes: increment(-1),
+               total_revenue: increment(-1 * revenue),
+               total_collected: increment(-1 * collected)
+            }
+          };
+
+          await Promise.all([
+             setDoc(dailyRef, revertPayload, { merge: true }),
+             setDoc(contactRef, revertPayload, { merge: true })
+          ]);
+       }
+
+    } catch (e) {
+       console.error("Delete Error", e);
+    } finally {
+       setIsSaving(false);
+    }
   };
 
   const mtdAggregated = useMemo(() => {
@@ -352,7 +450,7 @@ export default function App() {
               {!selectedLead ? (
                 <div className="h-full flex flex-col items-center justify-center opacity-30"><Target size={60} /><p className="mt-4 font-black uppercase tracking-[0.5em]">Select Client</p></div>
               ) : (
-                <div className="max-w-4xl mx-auto space-y-6">
+                <div className="max-w-4xl mx-auto space-y-6 pb-20">
                   <div className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm flex items-center justify-between">
                     <div className="flex items-center gap-5">
                       <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white font-black text-2xl">{selectedLead.name[0]}</div>
@@ -432,6 +530,46 @@ export default function App() {
                       </div>
                       <button onClick={handleClose} className="bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-emerald-900/20">Record Sale</button>
                     </div>
+                  </div>
+
+                   {/* --- Activity Logs Section --- */}
+                  <div className="mt-8">
+                     <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
+                        <History size={12} className="text-slate-400" /> Recent Activity Log
+                     </h3>
+                     {activityLogs.filter(log => log.contactId === selectedLeadId).length === 0 ? (
+                        <p className="text-[10px] text-slate-400 italic text-center">No recent activity recorded for this prospect.</p>
+                     ) : (
+                        <div className="space-y-3">
+                           {activityLogs
+                              .filter(log => log.contactId === selectedLeadId)
+                              .map(log => (
+                              <div key={log.id} className="flex items-center justify-between bg-white border border-slate-100 p-3 rounded-xl group hover:border-slate-200 transition-colors">
+                                 <div className="flex flex-col">
+                                    <span className="text-[10px] font-bold text-slate-700">
+                                       <span className="text-blue-600 font-black">{log.message}</span> 
+                                       <span className="text-slate-400 font-normal"> on </span>
+                                       <span className="text-slate-500 font-bold">{log.date}</span>
+                                    </span>
+                                    <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest mt-1">
+                                       {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                 </div>
+                                 
+                                 {/* Only show delete button for logs that have revert metadata */}
+                                 {log.meta && (
+                                   <button 
+                                      onClick={() => handleDeleteLog(log)}
+                                      title="Delete log and revert stats"
+                                      className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                                   >
+                                      <Trash2 size={12} />
+                                   </button>
+                                 )}
+                              </div>
+                           ))}
+                        </div>
+                     )}
                   </div>
                 </div>
               )}
