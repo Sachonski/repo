@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { increment } from "firebase/firestore";
 import { 
@@ -32,7 +32,8 @@ import {
   Loader2,
   RefreshCw,
   TrendingUp,
-  Save
+  Save,
+  UserPlus
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -123,12 +124,6 @@ const getDaysInCurrentMonth = () => {
   return dates;
 };
 
-const MOCK_LEADS = [
-  { id: 'mock1', name: 'Alex Thompson', email: 'alex.t@example.com' },
-  { id: 'mock2', name: 'Sarah Miller', email: 'sarah.m@example.com' },
-  { id: 'mock3', name: 'James Wilson', email: 'j.wilson@example.com' }
-];
-
 export default function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('logger'); 
@@ -137,15 +132,15 @@ export default function App() {
   const [contactStats, setContactStats] = useState({});
   const [leads, setLeads] = useState([]);
   const [selectedLeadId, setSelectedLeadId] = useState(null);
-  const [filterText, setFilterText] = useState('');
+  const [queryText, setQueryText] = useState('');
   const [transaction, setTransaction] = useState({ product: '', cash: '' });
-  const [loadingContacts, setLoadingContacts] = useState(true);
+  const [loadingContacts, setLoadingContacts] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
   const monthDates = useMemo(() => getDaysInCurrentMonth(), []);
   const selectedLead = useMemo(() => leads.find(l => l.id === selectedLeadId), [leads, selectedLeadId]);
 
-  // Auth & Initial Data
+  // Auth
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -185,8 +180,8 @@ export default function App() {
     return () => unsub();
   }, [user]);
 
-  // Fetch GoHighLevel Contacts
-  const fetchGHLContacts = async () => {
+  // --- GHL Contact Fetching Logic (Enhanced for Search) ---
+  const fetchGHLContacts = useCallback(async (searchQuery = '') => {
     setLoadingContacts(true);
     try {
       const parts = GHL_API_KEY.split('.');
@@ -196,7 +191,12 @@ export default function App() {
         locationId = payload.location_id;
       }
 
-      const response = await fetch(`https://rest.gohighlevel.com/v1/contacts/?locationId=${locationId}&limit=100`, {
+      // If query is provided, use the 'query' param; else just get 100 recent
+      const url = searchQuery 
+        ? `https://rest.gohighlevel.com/v1/contacts/?locationId=${locationId}&query=${encodeURIComponent(searchQuery)}&limit=100`
+        : `https://rest.gohighlevel.com/v1/contacts/?locationId=${locationId}&limit=100`;
+
+      const response = await fetch(url, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${GHL_API_KEY}`,
@@ -213,73 +213,53 @@ export default function App() {
         email: c.email || 'No email'
       }));
 
-      setLeads(mapped.length > 0 ? mapped : MOCK_LEADS);
+      setLeads(mapped);
     } catch (err) {
       console.error("Error fetching GHL contacts:", err);
-      setLeads(MOCK_LEADS);
+      // Fallback to empty leads on error if we don't have mock data logic here
     } finally {
       setLoadingContacts(false);
     }
-  };
+  }, []);
 
+  // Initial load
   useEffect(() => {
     if (user) fetchGHLContacts();
-  }, [user]);
+  }, [user, fetchGHLContacts]);
+
+  // Debounced search logic
+  useEffect(() => {
+    if (!user) return;
+    const timer = setTimeout(() => {
+      fetchGHLContacts(queryText);
+    }, 500); // Wait 500ms after last keystroke to search GHL
+    return () => clearTimeout(timer);
+  }, [queryText, user, fetchGHLContacts]);
 
   const updateMetric = async (metricId, delta) => {
-  if (!user || !selectedLeadId) return;
+    if (!user || !selectedLeadId) return;
 
-  const today = new Date().toISOString().split('T')[0];
-  const dailyId = `${today}_${currentRep}`;
+    const today = new Date().toISOString().split('T')[0];
+    const dailyId = `${today}_${currentRep}`;
 
-  try {
-    const dailyRef = doc(
-      db,
-      'artifacts',
-      appId,
-      'public',
-      'data',
-      'daily_stats',
-      dailyId
-    );
+    try {
+      const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
+      const contactRef = doc(db, 'artifacts', appId, 'public', 'data', 'contact_stats', selectedLeadId);
 
-    const contactRef = doc(
-      db,
-      'artifacts',
-      appId,
-      'public',
-      'data',
-      'contact_stats',
-      selectedLeadId
-    );
-
-    await Promise.all([
-      setDoc(
-        dailyRef,
-        {
+      await Promise.all([
+        setDoc(dailyRef, {
           date: today,
           rep: currentRep,
-          metrics: {
-            [metricId]: increment(delta)
-          }
-        },
-        { merge: true }
-      ),
-      setDoc(
-        contactRef,
-        {
-          metrics: {
-            [metricId]: increment(delta)
-          }
-        },
-        { merge: true }
-      )
-    ]);
-  } catch (err) {
-    console.error("Failed to update metric:", err);
-  }
-};
-
+          metrics: { [metricId]: increment(delta) }
+        }, { merge: true }),
+        setDoc(contactRef, {
+          metrics: { [metricId]: increment(delta) }
+        }, { merge: true })
+      ]);
+    } catch (err) {
+      console.error("Failed to update metric:", err);
+    }
+  };
 
   const handleClose = async () => {
     if (!transaction.product || !transaction.cash || !selectedLeadId || !user) return;
@@ -289,20 +269,20 @@ export default function App() {
       const today = new Date().toISOString().split('T')[0];
       const dailyId = `${today}_${currentRep}`;
       
-      const updateData = (existing) => {
-        const m = { ...(existing?.metrics || {}) };
-        m.closes = (m.closes || 0) + 1;
-        m.total_revenue = (m.total_revenue || 0) + (prod?.price || 0);
-        m.total_collected = (m.total_collected || 0) + Number(transaction.cash);
-        return { ...existing, metrics: m };
-      };
-
       const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
       const contactRef = doc(db, 'artifacts', appId, 'public', 'data', 'contact_stats', selectedLeadId);
 
+      const payload = {
+        metrics: {
+          closes: increment(1),
+          total_revenue: increment(prod?.price || 0),
+          total_collected: increment(Number(transaction.cash))
+        }
+      };
+
       await Promise.all([
-        setDoc(dailyRef, updateData(dailyStats[dailyId] || { date: today, rep: currentRep }), { merge: true }),
-        setDoc(contactRef, updateData(contactStats[selectedLeadId] || {}), { merge: true })
+        setDoc(dailyRef, { ...payload, date: today, rep: currentRep }, { merge: true }),
+        setDoc(contactRef, payload, { merge: true })
       ]);
 
       setTransaction({ product: '', cash: '' });
@@ -313,7 +293,6 @@ export default function App() {
     }
   };
 
-  const filteredLeads = leads.filter(l => l.name.toLowerCase().includes(filterText.toLowerCase()));
   const todayDateStr = new Date().toISOString().split('T')[0];
   const currentDayStats = dailyStats[`${todayDateStr}_${currentRep}`]?.metrics || {};
 
@@ -334,7 +313,7 @@ export default function App() {
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-2">
             <Activity className="text-blue-600" size={20} />
-            <span className="font-black text-slate-900 uppercase tracking-tighter text-base italic hidden sm:inline">Manic Systems</span>
+            <span className="font-black text-slate-900 uppercase tracking-tighter text-base italic hidden sm:inline">Manic Sales</span>
           </div>
           <nav className="flex bg-slate-100 p-1 rounded-xl">
             <button onClick={() => setActiveTab('logger')} className={`px-5 py-1.5 rounded-lg font-black uppercase text-[9px] transition-all ${activeTab === 'logger' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}>Activity Logger</button>
@@ -361,31 +340,38 @@ export default function App() {
             <div className="w-80 bg-white border-r border-slate-200 flex flex-col z-10 shadow-lg sm:shadow-none absolute inset-y-0 left-0 sm:relative transform -translate-x-full sm:translate-x-0 transition-transform duration-200">
               <div className="p-4 border-b border-slate-100 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-black uppercase text-[9px] text-slate-400">GHL Contacts</span>
-                  <button onClick={fetchGHLContacts} className="p-1 hover:bg-slate-100 rounded-md transition-colors">
+                  <span className="font-black uppercase text-[9px] text-slate-400">GHL Contact Search</span>
+                  <button onClick={() => fetchGHLContacts(queryText)} className="p-1 hover:bg-slate-100 rounded-md transition-colors">
                     <RefreshCw size={10} className={`${loadingContacts ? 'animate-spin' : ''} text-blue-600`} />
                   </button>
                 </div>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
+                  {loadingContacts ? (
+                     <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-600 animate-spin" size={12} />
+                  ) : (
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
+                  )}
                   <input 
                     type="text" 
-                    placeholder="Search contacts..." 
+                    placeholder="Search name or email..." 
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-9 text-[10px] font-bold outline-none focus:border-blue-500 transition-colors" 
-                    value={filterText} 
-                    onChange={e => setFilterText(e.target.value)} 
+                    value={queryText} 
+                    onChange={e => setQueryText(e.target.value)} 
                   />
                 </div>
+                {queryText && !loadingContacts && leads.length === 0 && (
+                   <p className="text-[8px] font-bold text-orange-600 uppercase text-center">No matches found in GHL</p>
+                )}
               </div>
               
               <div className="flex-1 overflow-y-auto">
-                {loadingContacts ? (
-                  <div className="p-10 flex flex-col items-center gap-2 opacity-50">
-                    <Loader2 className="animate-spin text-blue-600" size={20} />
-                    <p className="font-black uppercase text-[8px] tracking-widest">Syncing CRM...</p>
+                {leads.length === 0 && !loadingContacts ? (
+                  <div className="p-10 text-center opacity-30 flex flex-col items-center">
+                    <UserPlus size={24} className="mb-2" />
+                    <p className="font-black uppercase text-[8px] tracking-widest leading-relaxed">Enter a search term to find contacts in the CRM</p>
                   </div>
                 ) : (
-                  filteredLeads.map(l => (
+                  leads.map(l => (
                     <div key={l.id} onClick={() => setSelectedLeadId(l.id)} className={`px-4 py-3 cursor-pointer border-b border-slate-50 transition-colors ${selectedLeadId === l.id ? 'bg-blue-50 border-blue-100' : 'hover:bg-slate-50'}`}>
                       <div className="flex-1 min-w-0">
                         <p className={`font-black uppercase truncate text-[11px] ${selectedLeadId === l.id ? 'text-blue-700' : 'text-slate-700'}`}>{l.name}</p>
@@ -594,4 +580,4 @@ export default function App() {
       </main>
     </div>
   );
-} 
+}
