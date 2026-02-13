@@ -41,7 +41,6 @@ import {
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
-// --- Firebase Configuration ---
 const firebaseConfig = typeof __firebase_config !== 'undefined' 
   ? JSON.parse(__firebase_config) 
   : {
@@ -132,6 +131,15 @@ const getDaysInCurrentMonth = () => {
   return dates;
 };
 
+// Helper to get formatted local date string
+const getLocalDateKey = () => {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('logger'); 
@@ -144,6 +152,9 @@ export default function App() {
   const [transaction, setTransaction] = useState({ product: '', cash: '' });
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Date Selector State - Defaults to today
+  const [selectedDate, setSelectedDate] = useState(() => getLocalDateKey());
   
   const monthDates = useMemo(() => getDaysInCurrentMonth(), []);
   const selectedLead = useMemo(() => leads.find(l => l.id === selectedLeadId), [leads, selectedLeadId]);
@@ -222,22 +233,15 @@ export default function App() {
   }, [queryText, user, fetchGHLContacts]);
 
   const updateMetric = async (metricId, delta) => {
-    const getLocalDateKey = () => {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
     if (!user || !selectedLeadId) return;
     setIsSaving(true);
-    const today = getLocalDateKey();
-    const dailyId = `${today}_${currentRep}`;
+    // Use selectedDate instead of always using today
+    const dailyId = `${selectedDate}_${currentRep}`;
     try {
       const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
       const contactRef = doc(db, 'artifacts', appId, 'public', 'data', 'contact_stats', selectedLeadId);
       await Promise.all([
-        setDoc(dailyRef, { date: today, rep: currentRep, metrics: { [metricId]: increment(delta) } }, { merge: true }),
+        setDoc(dailyRef, { date: selectedDate, rep: currentRep, metrics: { [metricId]: increment(delta) } }, { merge: true }),
         setDoc(contactRef, { metrics: { [metricId]: increment(delta) } }, { merge: true })
       ]);
     } catch (err) { console.error("Metric Error:", err); }
@@ -245,19 +249,12 @@ export default function App() {
   };
 
   const handleClose = async () => {
-    const getLocalDateKey = () => {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
     if (!transaction.product || !transaction.cash || !selectedLeadId || !user) return;
     setIsSaving(true);
     try {
       const prod = PRODUCTS.find(p => p.id === transaction.product);
-      const today = getLocalDateKey();
-      const dailyId = `${today}_${currentRep}`;
+      // Use selectedDate for the transaction record
+      const dailyId = `${selectedDate}_${currentRep}`;
       const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
       const contactRef = doc(db, 'artifacts', appId, 'public', 'data', 'contact_stats', selectedLeadId);
       const payload = {
@@ -268,7 +265,7 @@ export default function App() {
         }
       };
       await Promise.all([
-        setDoc(dailyRef, { ...payload, date: today, rep: currentRep }, { merge: true }),
+        setDoc(dailyRef, { ...payload, date: selectedDate, rep: currentRep }, { merge: true }),
         setDoc(contactRef, payload, { merge: true })
       ]);
       setTransaction({ product: '', cash: '' });
@@ -367,9 +364,28 @@ export default function App() {
                   </div>
 
                   <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm p-8">
-                    <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
-                      <Zap size={12} className="text-blue-600" /> Log Interaction Points
-                    </h3>
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                        <Zap size={12} className="text-blue-600" /> Log Interaction Points
+                      </h3>
+                      
+                      {/* --- DATE SELECTOR --- */}
+                      <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg p-1 pr-3">
+                         <div className="bg-white border border-slate-200 rounded-md p-1">
+                           <Calendar size={12} className="text-slate-400" />
+                         </div>
+                         <div className="flex flex-col">
+                            <label className="text-[7px] font-black text-slate-400 uppercase leading-none">Log Date</label>
+                            <input 
+                              type="date" 
+                              value={selectedDate} 
+                              onChange={(e) => setSelectedDate(e.target.value)}
+                              className="bg-transparent text-[10px] font-black text-slate-700 outline-none p-0 w-24 cursor-pointer"
+                            />
+                         </div>
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                       {KPI_GROUPS.FUNNEL.map(kpi => (
                         <div key={kpi.id} className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex flex-col gap-3 group hover:border-blue-200 transition-all">
@@ -430,14 +446,14 @@ export default function App() {
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-2">MTD Performance Analytics • {currentRep}</p>
                 </div>
                 <div className="flex gap-4">
-                   <div className="text-right">
-                     <p className="text-[8px] font-black text-slate-400 uppercase">MTD Revenue</p>
-                     <p className="text-2xl font-black text-slate-900">${(mtdAggregated.total_revenue || 0).toLocaleString()}</p>
-                   </div>
-                   <div className="text-right">
-                     <p className="text-[8px] font-black text-slate-400 uppercase">MTD Collected</p>
-                     <p className="text-2xl font-black text-emerald-600">${(mtdAggregated.total_collected || 0).toLocaleString()}</p>
-                   </div>
+                    <div className="text-right">
+                      <p className="text-[8px] font-black text-slate-400 uppercase">MTD Revenue</p>
+                      <p className="text-2xl font-black text-slate-900">${(mtdAggregated.total_revenue || 0).toLocaleString()}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[8px] font-black text-slate-400 uppercase">MTD Collected</p>
+                      <p className="text-2xl font-black text-emerald-600">${(mtdAggregated.total_collected || 0).toLocaleString()}</p>
+                    </div>
                 </div>
               </header>
 
