@@ -5,7 +5,7 @@ import {
   doc, 
   setDoc, 
   addDoc,
-  deleteDoc, // Added deleteDoc
+  deleteDoc,
   onSnapshot, 
   collection,
   increment,
@@ -41,7 +41,9 @@ import {
   Percent,
   Coins,
   History,
-  Trash2 // Added Trash2 icon
+  Trash2,
+  ArrowRight,
+  Download
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -74,17 +76,17 @@ const PRODUCTS = [
 
 const KPI_GROUPS = {
   FUNNEL: [
-    { id: 'scheduled', label: 'Scheduled Calls', icon: Calendar, color: 'text-blue-500', bgColor: 'bg-blue-50', borderColor: 'border-blue-100' },
-    { id: 'showed', label: 'Showed', icon: CheckCircle, color: 'text-green-500', bgColor: 'bg-green-50', borderColor: 'border-green-100' },
-    { id: 'fu_booked', label: 'Follow-ups Booked', icon: Phone, color: 'text-indigo-500', bgColor: 'bg-indigo-50', borderColor: 'border-indigo-100' },
-    { id: 'fu_showed', label: 'Follow up (Showed)', icon: Users, color: 'text-sky-500', bgColor: 'bg-sky-50', borderColor: 'border-sky-100' },
-    { id: 'offers', label: 'Offers', icon: ThumbsUp, color: 'text-blue-600', bgColor: 'bg-blue-50', borderColor: 'border-blue-100' },
-    { id: 'closes', label: 'Closes', icon: DollarSign, color: 'text-emerald-600', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-100' },
-    { id: 'fu_closes', label: 'Follow-up Closes', icon: CheckCircle, color: 'text-emerald-500', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-100' },
-    { id: 'resched_req', label: 'Rescheduled Request', icon: RotateCcw, color: 'text-orange-500', bgColor: 'bg-orange-50', borderColor: 'border-orange-100' },
-    { id: 'no_show', label: 'No show Calls', icon: AlertCircle, color: 'text-red-500', bgColor: 'bg-red-50', borderColor: 'border-red-100' },
-    { id: 'cancelled', label: 'Cancelled Calls', icon: XCircle, color: 'text-slate-400', bgColor: 'bg-slate-50', borderColor: 'border-slate-100' },
-    { id: 'verbal_yes', label: 'Verbal Yes', icon: Zap, color: 'text-yellow-500', bgColor: 'bg-yellow-50', borderColor: 'border-yellow-100' },
+    { id: 'scheduled', label: 'Scheduled Calls', icon: Calendar, color: 'text-blue-500' },
+    { id: 'showed', label: 'Showed', icon: CheckCircle, color: 'text-green-500' },
+    { id: 'fu_booked', label: 'Follow-ups Booked', icon: Phone, color: 'text-indigo-500' },
+    { id: 'fu_showed', label: 'Follow up (Showed)', icon: Users, color: 'text-sky-500' },
+    { id: 'offers', label: 'Offers', icon: ThumbsUp, color: 'text-blue-600' },
+    { id: 'closes', label: 'Closes', icon: DollarSign, color: 'text-emerald-600' },
+    { id: 'fu_closes', label: 'Follow-up Closes', icon: CheckCircle, color: 'text-emerald-500' },
+    { id: 'resched_req', label: 'Rescheduled Request', icon: RotateCcw, color: 'text-orange-500' },
+    { id: 'no_show', label: 'No show Calls', icon: AlertCircle, color: 'text-red-500' },
+    { id: 'cancelled', label: 'Cancelled Calls', icon: XCircle, color: 'text-slate-400' },
+    { id: 'verbal_yes', label: 'Verbal Yes', icon: Zap, color: 'text-yellow-500' },
   ]
 };
 
@@ -120,28 +122,23 @@ const getCalculatedDashboard = (m = {}) => {
   };
 };
 
-const getDaysInCurrentMonth = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-  const dates = [];
-  for (let day = 1; day <= daysInMonth; day++) {
-    const mm = String(month + 1).padStart(2, '0');
-    const dd = String(day).padStart(2, '0');
-    dates.push(`${year}-${mm}-${dd}`); // local-stable YYYY-MM-DD
-  }
-  return dates;
+const getLocalDateKey = (date = new Date()) => {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 };
 
-// Helper to get formatted local date string
-const getLocalDateKey = () => {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+const getDaysInRange = (startStr, endStr) => {
+  const start = new Date(startStr + 'T00:00:00');
+  const end = new Date(endStr + 'T00:00:00');
+  const dates = [];
+  let current = new Date(start);
+  while (current <= end) {
+    dates.push(getLocalDateKey(current));
+    current.setDate(current.getDate() + 1);
+  }
+  return dates;
 };
 
 export default function App() {
@@ -158,10 +155,17 @@ export default function App() {
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
-  // Date Selector State - Defaults to today
   const [selectedDate, setSelectedDate] = useState(() => getLocalDateKey());
+
+  const [rangeStart, setRangeStart] = useState(() => {
+    const d = new Date();
+    return getLocalDateKey(new Date(d.getFullYear(), d.getMonth(), 1));
+  });
+  const [rangeEnd, setRangeEnd] = useState(() => {
+    const d = new Date();
+    return getLocalDateKey(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+  });
   
-  const monthDates = useMemo(() => getDaysInCurrentMonth(), []);
   const selectedLead = useMemo(() => leads.find(l => l.id === selectedLeadId), [leads, selectedLeadId]);
 
   useEffect(() => {
@@ -207,7 +211,6 @@ export default function App() {
     const unsub = onSnapshot(logsRef, (snapshot) => {
       const logs = [];
       snapshot.docs.forEach(doc => { logs.push({ id: doc.id, ...doc.data() }); });
-      // Sort by timestamp desc in memory
       logs.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
       setActivityLogs(logs);
     }, (err) => console.error("Logs Sync Error:", err));
@@ -250,38 +253,28 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [queryText, user, fetchGHLContacts]);
 
-  const logActivity = async (message, type, meta) => {
-    if (!selectedLeadId) return;
-    try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs'), {
-        contactId: selectedLeadId,
-        contactName: selectedLead?.name || 'Unknown',
-        rep: currentRep,
-        date: selectedDate,
-        message,
-        type,
-        meta,
-        timestamp: new Date().toISOString()
-      });
-    } catch(e) { console.error("Logging Error", e); }
-  };
-
   const updateMetric = async (metricId, delta) => {
     if (!user || !selectedLeadId) return;
     setIsSaving(true);
-    // Use selectedDate instead of always using today
     const dailyId = `${selectedDate}_${currentRep}`;
     try {
       const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
       const contactRef = doc(db, 'artifacts', appId, 'public', 'data', 'contact_stats', selectedLeadId);
-      
       const metricLabel = KPI_GROUPS.FUNNEL.find(k => k.id === metricId)?.label || metricId;
-      const logMsg = `${currentRep} marked ${metricLabel} (${delta > 0 ? '+1' : '-1'})`;
-
+      
       await Promise.all([
         setDoc(dailyRef, { date: selectedDate, rep: currentRep, metrics: { [metricId]: increment(delta) } }, { merge: true }),
         setDoc(contactRef, { metrics: { [metricId]: increment(delta) } }, { merge: true }),
-        logActivity(logMsg, 'kpi', { metricId, delta, date: selectedDate, rep: currentRep })
+        addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs'), {
+          contactId: selectedLeadId,
+          contactName: selectedLead?.name || 'Unknown',
+          rep: currentRep,
+          date: selectedDate,
+          message: `${currentRep} marked ${metricLabel} (${delta > 0 ? '+1' : '-1'})`,
+          type: 'kpi',
+          meta: { metricId, delta, date: selectedDate, rep: currentRep },
+          timestamp: new Date().toISOString()
+        })
       ]);
     } catch (err) { console.error("Metric Error:", err); }
     finally { setIsSaving(false); }
@@ -292,7 +285,6 @@ export default function App() {
     setIsSaving(true);
     try {
       const prod = PRODUCTS.find(p => p.id === transaction.product);
-      // Use selectedDate for the transaction record
       const dailyId = `${selectedDate}_${currentRep}`;
       const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
       const contactRef = doc(db, 'artifacts', appId, 'public', 'data', 'contact_stats', selectedLeadId);
@@ -303,12 +295,20 @@ export default function App() {
           total_collected: increment(Number(transaction.cash))
         }
       };
-      const logMsg = `${currentRep} closed ${prod?.name || 'Item'} ($${transaction.cash} collected)`;
 
       await Promise.all([
         setDoc(dailyRef, { ...payload, date: selectedDate, rep: currentRep }, { merge: true }),
         setDoc(contactRef, payload, { merge: true }),
-        logActivity(logMsg, 'sale', { revenue: prod?.price || 0, collected: Number(transaction.cash), date: selectedDate, rep: currentRep })
+        addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'activity_logs'), {
+          contactId: selectedLeadId,
+          contactName: selectedLead?.name || 'Unknown',
+          rep: currentRep,
+          date: selectedDate,
+          message: `${currentRep} closed ${prod?.name} ($${transaction.cash} collected)`,
+          type: 'sale',
+          meta: { revenue: prod?.price || 0, collected: Number(transaction.cash), date: selectedDate, rep: currentRep },
+          timestamp: new Date().toISOString()
+        })
       ]);
       setTransaction({ product: '', cash: '' });
     } catch (err) { console.error("Transaction Error:", err); } 
@@ -317,70 +317,79 @@ export default function App() {
 
   const handleDeleteLog = async (log) => {
     if (!log.meta || !user) return;
-    // Basic confirmation can be improved with a custom modal if needed
-    // but standard browser confirm works well for safety here
     if (!window.confirm("Are you sure? This will revert the statistics associated with this log.")) return;
-    
     setIsSaving(true);
     try {
-       // 1. Delete the log entry
        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'activity_logs', log.id));
-
-       // 2. Revert the changes based on type
        const { type, meta, contactId } = log;
-       
        if (type === 'kpi') {
           const { metricId, delta, date, rep } = meta;
-          // Reverse delta
           const reverseDelta = delta * -1;
           const dailyId = `${date}_${rep}`;
-          
           const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
           const contactRef = doc(db, 'artifacts', appId, 'public', 'data', 'contact_stats', contactId);
-
           await Promise.all([
              setDoc(dailyRef, { metrics: { [metricId]: increment(reverseDelta) } }, { merge: true }),
              setDoc(contactRef, { metrics: { [metricId]: increment(reverseDelta) } }, { merge: true })
           ]);
-
        } else if (type === 'sale') {
           const { revenue, collected, date, rep } = meta;
           const dailyId = `${date}_${rep}`;
-          
           const dailyRef = doc(db, 'artifacts', appId, 'public', 'data', 'daily_stats', dailyId);
           const contactRef = doc(db, 'artifacts', appId, 'public', 'data', 'contact_stats', contactId);
-          
-          const revertPayload = {
-            metrics: {
-               closes: increment(-1),
-               total_revenue: increment(-1 * revenue),
-               total_collected: increment(-1 * collected)
-            }
-          };
-
+          const revertPayload = { metrics: { closes: increment(-1), total_revenue: increment(-1 * revenue), total_collected: increment(-1 * collected) } };
           await Promise.all([
              setDoc(dailyRef, revertPayload, { merge: true }),
              setDoc(contactRef, revertPayload, { merge: true })
           ]);
        }
-
-    } catch (e) {
-       console.error("Delete Error", e);
-    } finally {
-       setIsSaving(false);
-    }
+    } catch (e) { console.error("Delete Error", e); } 
+    finally { setIsSaving(false); }
   };
 
-  const mtdAggregated = useMemo(() => {
+  const currentRangeDates = useMemo(() => getDaysInRange(rangeStart, rangeEnd), [rangeStart, rangeEnd]);
+
+  const rangeAggregated = useMemo(() => {
     const agg = {};
-    monthDates.forEach(date => {
+    currentRangeDates.forEach(date => {
       const dayMetrics = dailyStats[`${date}_${currentRep}`]?.metrics || {};
       Object.entries(dayMetrics).forEach(([k, v]) => { agg[k] = (agg[k] || 0) + v; });
     });
     return agg;
-  }, [dailyStats, currentRep, monthDates]);
+  }, [dailyStats, currentRep, currentRangeDates]);
 
-  const dashboardCalculations = useMemo(() => getCalculatedDashboard(mtdAggregated), [mtdAggregated]);
+  const dashboardCalculations = useMemo(() => getCalculatedDashboard(rangeAggregated), [rangeAggregated]);
+
+  const downloadCSV = () => {
+    const tableRows = [...KPI_GROUPS.FUNNEL, {id: 'total_revenue', label: 'Revenue'}, {id: 'total_collected', label: 'Collected'}];
+    
+    // Header Row
+    let csvContent = "Metric,Total," + currentRangeDates.map(d => d).join(",") + "\n";
+    
+    // Data Rows
+    tableRows.forEach(row => {
+      let line = `${row.label},`;
+      const totalVal = row.id.includes('total') ? (rangeAggregated[row.id] || 0) : (rangeAggregated[row.id] || 0);
+      line += `${totalVal},`;
+      
+      const dayValues = currentRangeDates.map(d => {
+        const dayData = dailyStats[`${d}_${currentRep}`];
+        return dayData?.metrics?.[row.id] || (row.id.includes('total') ? (dayData?.[row.id] || 0) : 0);
+      });
+      
+      line += dayValues.join(",");
+      csvContent += line + "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${currentRep}_Sales_Data_${rangeStart}_to_${rangeEnd}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const MetricBox = ({ label, val, unit }) => (
     <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
@@ -427,13 +436,7 @@ export default function App() {
                 </div>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
-                  <input 
-                    type="text" 
-                    placeholder="Find in CRM..." 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-9 text-[10px] font-bold outline-none" 
-                    value={queryText} 
-                    onChange={e => setQueryText(e.target.value)} 
-                  />
+                  <input type="text" placeholder="Find in CRM..." className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-9 text-[10px] font-bold outline-none" value={queryText} onChange={e => setQueryText(e.target.value)} />
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto">
@@ -459,36 +462,22 @@ export default function App() {
                         <p className="text-slate-400 font-bold uppercase text-[9px]">{selectedLead.email}</p>
                       </div>
                     </div>
+                    <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg p-1 pr-3">
+                         <div className="bg-white border border-slate-200 rounded-md p-1"><Calendar size={12} className="text-slate-400" /></div>
+                         <div className="flex flex-col">
+                            <label className="text-[7px] font-black text-slate-400 uppercase leading-none">Log Date</label>
+                            <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="bg-transparent text-[10px] font-black text-slate-700 outline-none p-0 w-24 cursor-pointer" />
+                         </div>
+                    </div>
                   </div>
 
                   <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm p-8">
-                    <div className="flex items-center justify-between mb-6">
-                      <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-                        <Zap size={12} className="text-blue-600" /> Log Interaction Points
-                      </h3>
-                      
-                      {/* --- DATE SELECTOR --- */}
-                      <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-lg p-1 pr-3">
-                         <div className="bg-white border border-slate-200 rounded-md p-1">
-                           <Calendar size={12} className="text-slate-400" />
-                         </div>
-                         <div className="flex flex-col">
-                            <label className="text-[7px] font-black text-slate-400 uppercase leading-none">Log Date</label>
-                            <input 
-                              type="date" 
-                              value={selectedDate} 
-                              onChange={(e) => setSelectedDate(e.target.value)}
-                              className="bg-transparent text-[10px] font-black text-slate-700 outline-none p-0 w-24 cursor-pointer"
-                            />
-                         </div>
-                      </div>
-                    </div>
-
+                    <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2 mb-6"><Zap size={12} className="text-blue-600" /> Interaction Points</h3>
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                       {KPI_GROUPS.FUNNEL.map(kpi => (
                         <div key={kpi.id} className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex flex-col gap-3 group hover:border-blue-200 transition-all">
                           <div className="flex items-center gap-2">
-                            <kpi.icon size={12} className={kpi.color} />
+                            <span className={`w-2 h-2 rounded-full ${kpi.color.replace('text-', 'bg-')}`}></span>
                             <span className="font-black uppercase text-[8px] text-slate-600 truncate">{kpi.label}</span>
                           </div>
                           <div className="flex items-center justify-between">
@@ -504,72 +493,36 @@ export default function App() {
                   </div>
 
                   <div className="bg-slate-900 rounded-[32px] p-8 text-white">
-                    <h2 className="text-[9px] font-black uppercase tracking-widest mb-6 flex items-center gap-2">
-                      <DollarSign size={14} className="text-emerald-400" /> Record Closing Action
-                    </h2>
+                    <h2 className="text-[9px] font-black uppercase tracking-widest mb-6 flex items-center gap-2"><DollarSign size={14} className="text-emerald-400" /> Closing Action</h2>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                       <div className="space-y-2">
                         <label className="text-[7px] font-black uppercase text-slate-500">Package</label>
-                        <select 
-                          className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-[10px] font-black outline-none"
-                          value={transaction.product}
-                          onChange={e => setTransaction({...transaction, product: e.target.value})}
-                        >
+                        <select className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-[10px] font-black outline-none" value={transaction.product} onChange={e => setTransaction({...transaction, product: e.target.value})}>
                           <option value="">Select...</option>
                           {PRODUCTS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                       </div>
                       <div className="space-y-2">
                         <label className="text-[7px] font-black uppercase text-slate-500">Collected</label>
-                        <input 
-                          type="number" placeholder="0.00" 
-                          className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-[10px] font-black"
-                          value={transaction.cash}
-                          onChange={e => setTransaction({...transaction, cash: e.target.value})}
-                        />
+                        <input type="number" placeholder="0.00" className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-[10px] font-black" value={transaction.cash} onChange={e => setTransaction({...transaction, cash: e.target.value})} />
                       </div>
                       <button onClick={handleClose} className="bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-emerald-900/20">Record Sale</button>
                     </div>
                   </div>
 
-                   {/* --- Activity Logs Section --- */}
                   <div className="mt-8">
-                     <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
-                        <History size={12} className="text-slate-400" /> Recent Activity Log
-                     </h3>
-                     {activityLogs.filter(log => log.contactId === selectedLeadId).length === 0 ? (
-                        <p className="text-[10px] text-slate-400 italic text-center">No recent activity recorded for this prospect.</p>
-                     ) : (
-                        <div className="space-y-3">
-                           {activityLogs
-                              .filter(log => log.contactId === selectedLeadId)
-                              .map(log => (
-                              <div key={log.id} className="flex items-center justify-between bg-white border border-slate-100 p-3 rounded-xl group hover:border-slate-200 transition-colors">
-                                 <div className="flex flex-col">
-                                    <span className="text-[10px] font-bold text-slate-700">
-                                       <span className="text-blue-600 font-black">{log.message}</span> 
-                                       <span className="text-slate-400 font-normal"> on </span>
-                                       <span className="text-slate-500 font-bold">{log.date}</span>
-                                    </span>
-                                    <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest mt-1">
-                                       {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </span>
-                                 </div>
-                                 
-                                 {/* Only show delete button for logs that have revert metadata */}
-                                 {log.meta && (
-                                   <button 
-                                      onClick={() => handleDeleteLog(log)}
-                                      title="Delete log and revert stats"
-                                      className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                                   >
-                                      <Trash2 size={12} />
-                                   </button>
-                                 )}
+                     <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2"><History size={12} className="text-slate-400" /> Recent Log</h3>
+                     <div className="space-y-3">
+                        {activityLogs.filter(log => log.contactId === selectedLeadId).map(log => (
+                           <div key={log.id} className="flex items-center justify-between bg-white border border-slate-100 p-3 rounded-xl group hover:border-slate-200 transition-colors">
+                              <div>
+                                 <p className="text-[10px] font-bold text-slate-700">{log.message} <span className="text-slate-400 italic font-normal">({log.date})</span></p>
+                                 <p className="text-[8px] text-slate-300 uppercase tracking-widest mt-1">{new Date(log.timestamp).toLocaleTimeString()}</p>
                               </div>
-                           ))}
-                        </div>
-                     )}
+                              <button onClick={() => handleDeleteLog(log)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={12} /></button>
+                           </div>
+                        ))}
+                     </div>
                   </div>
                 </div>
               )}
@@ -577,104 +530,95 @@ export default function App() {
           </>
         ) : (
           <div className="flex-1 overflow-y-auto p-8 bg-slate-50">
-            <div className="max-w-6xl mx-auto space-y-12">
-              <header className="flex justify-between items-end">
+            <div className="max-w-6xl mx-auto space-y-8">
+              <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
                 <div>
                   <h1 className="text-4xl font-black italic tracking-tighter uppercase">Dashboard</h1>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-2">MTD Performance Analytics • {currentRep}</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-2">Custom Range Performance • {currentRep}</p>
                 </div>
-                <div className="flex gap-4">
-                    <div className="text-right">
-                      <p className="text-[8px] font-black text-slate-400 uppercase">MTD Revenue</p>
-                      <p className="text-2xl font-black text-slate-900">${(mtdAggregated.total_revenue || 0).toLocaleString()}</p>
+                <div className="flex items-center gap-3">
+                  <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <input type="date" value={rangeStart} onChange={e => setRangeStart(e.target.value)} className="text-[10px] font-black bg-slate-50 p-1.5 rounded-lg border border-slate-100" />
+                      <ArrowRight size={10} className="text-slate-300" />
+                      <input type="date" value={rangeEnd} onChange={e => setRangeEnd(e.target.value)} className="text-[10px] font-black bg-slate-50 p-1.5 rounded-lg border border-slate-100" />
                     </div>
-                    <div className="text-right">
-                      <p className="text-[8px] font-black text-slate-400 uppercase">MTD Collected</p>
-                      <p className="text-2xl font-black text-emerald-600">${(mtdAggregated.total_collected || 0).toLocaleString()}</p>
-                    </div>
+                  </div>
+                  <button 
+                    onClick={downloadCSV}
+                    className="flex items-center gap-2 bg-slate-900 text-white px-4 py-3 rounded-2xl font-black uppercase text-[9px] hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10"
+                  >
+                    <Download size={14} />
+                    Export CSV
+                  </button>
                 </div>
               </header>
 
+              <div className="flex gap-4 p-4 bg-blue-600 rounded-3xl text-white shadow-xl">
+                    <div className="flex-1">
+                      <p className="text-[8px] font-black text-blue-200 uppercase">Range Revenue</p>
+                      <p className="text-3xl font-black">${(rangeAggregated.total_revenue || 0).toLocaleString()}</p>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-[8px] font-black text-blue-200 uppercase">Range Collected</p>
+                      <p className="text-3xl font-black">${(rangeAggregated.total_collected || 0).toLocaleString()}</p>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-[8px] font-black text-blue-200 uppercase">Close Ratio</p>
+                      <p className="text-3xl font-black">
+                        {Math.round(((rangeAggregated.closes || 0) / (((rangeAggregated.showed || 0) + (rangeAggregated.fu_showed || 0)) || 1)) * 100)}%
+                      </p>
+                    </div>
+              </div>
+
               <div className="space-y-10">
-                {/* Shows & Attendance */}
                 <section>
-                  <h3 className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-4 flex items-center gap-2">
-                    <Users size={12} /> Show & Attendance Metrics
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {dashboardCalculations.shows.map(m => <MetricBox key={m.label} {...m} />)}
-                  </div>
+                  <h3 className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-4">Shows & Attendance</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{dashboardCalculations.shows.map(m => <MetricBox key={m.label} {...m} />)}</div>
                 </section>
-
-                {/* Financial Group */}
                 <section>
-                  <h3 className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-4 flex items-center gap-2">
-                    <Coins size={12} /> Financial Health
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {dashboardCalculations.finance.map(m => <MetricBox key={m.label} {...m} />)}
-                  </div>
+                  <h3 className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-4">Financials</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">{dashboardCalculations.finance.map(m => <MetricBox key={m.label} {...m} />)}</div>
                 </section>
-
-                {/* Efficiency Stats */}
                 <section>
-                  <h3 className="text-[9px] font-black text-orange-600 uppercase tracking-widest mb-4 flex items-center gap-2">
-                    <TrendingUp size={12} /> Efficiency Ratios
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                    {dashboardCalculations.efficiency.map(m => <MetricBox key={m.label} {...m} />)}
-                  </div>
-                </section>
-
-                {/* Closing Stats */}
-                <section>
-                  <h3 className="text-[9px] font-black text-indigo-600 uppercase tracking-widest mb-4 flex items-center gap-2">
-                    <CheckCircle size={12} /> Closing & Offers
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {dashboardCalculations.closing.map(m => <MetricBox key={m.label} {...m} />)}
-                  </div>
+                  <h3 className="text-[9px] font-black text-orange-600 uppercase tracking-widest mb-4">Efficiency</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">{dashboardCalculations.efficiency.map(m => <MetricBox key={m.label} {...m} />)}</div>
                 </section>
               </div>
 
-              {/* Data Table */}
-              <div className="bg-white rounded-[32px] border border-slate-200 overflow-hidden shadow-sm overflow-x-auto">
+              <div className="bg-white rounded-[32px] border border-slate-200 overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
                   <table className="w-full text-left">
-          <thead>
-            <tr className="bg-slate-900 text-white text-xs uppercase">
-              <th className="p-4 sticky left-0 bg-slate-900">Metric</th>
-              <th className="p-4 text-center bg-blue-900">Total</th>
-
-              {/* 🔥 FULL MONTH — NO SLICE */}
-             {monthDates.map(d => (
-  <th key={d} className="p-4 text-center min-w-[50px]">
-    {Number(d.split('-')[2])}
-  </th>
-))}
-            </tr>
-          </thead>
-
-          <tbody>
-            {KPI_GROUPS.FUNNEL.map(kpi => (
-              <tr key={kpi.id} className="border-b hover:bg-slate-50">
-                <td className="p-4 sticky left-0 bg-white font-bold">
-                  {kpi.label}
-                </td>
-
-                <td className="p-4 text-center font-bold text-blue-600">
-                  {mtdAggregated[kpi.id] || 0}
-                </td>
-
-                {/* 🔥 FULL MONTH — NO SLICE */}
-                {monthDates.map(d => (
-                  <td key={d} className="p-4 text-center text-slate-500">
-                    {dailyStats[`${d}_${currentRep}`]?.metrics?.[kpi.id] || 0}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    <thead>
+                      <tr className="bg-slate-900 text-white text-[9px] uppercase tracking-wider">
+                        <th className="p-4 sticky left-0 bg-slate-900 z-10 border-r border-slate-800">Metric</th>
+                        <th className="p-4 text-center bg-blue-900">Total</th>
+                        {currentRangeDates.map(d => (
+                          <th key={d} className="p-4 text-center min-w-[70px] border-l border-slate-800">{d.split('-').slice(1).join('/')}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...KPI_GROUPS.FUNNEL, {id: 'total_revenue', label: 'Revenue'}, {id: 'total_collected', label: 'Collected'}].map(item => (
+                        <tr key={item.id} className="border-b hover:bg-slate-50 transition-colors">
+                          <td className="p-4 sticky left-0 bg-white font-black text-slate-700 border-r border-slate-100 uppercase text-[9px]">{item.label}</td>
+                          <td className="p-4 text-center font-black text-blue-600 bg-blue-50/50">
+                            {item.id.includes('total') ? `$${Math.round(rangeAggregated[item.id] || 0).toLocaleString()}` : (rangeAggregated[item.id] || 0)}
+                          </td>
+                          {currentRangeDates.map(d => {
+                            const dayData = dailyStats[`${d}_${currentRep}`];
+                            const val = dayData?.metrics?.[item.id] || (item.id.includes('total') ? (dayData?.[item.id] || 0) : 0);
+                            return (
+                              <td key={d} className={`p-4 text-center text-[10px] font-bold border-l border-slate-50 ${val > 0 ? 'text-slate-900' : 'text-slate-300'}`}>
+                                {item.id.includes('total') ? (val > 0 ? `$${Math.round(val)}` : '-') : (val || '-')}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
