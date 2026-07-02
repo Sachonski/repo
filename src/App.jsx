@@ -34,7 +34,9 @@ import {
   History,
   Trash2,
   ArrowRight,
-  Download
+  Download,
+  ClipboardList,
+  Receipt
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -210,6 +212,20 @@ export default function App() {
     const d = new Date();
     return getLocalDateKey(new Date(d.getFullYear(), d.getMonth() + 1, 0));
   });
+
+  // --- Sales tab specific filters ---
+  const [salesRangeStart, setSalesRangeStart] = useState(() => {
+    const d = new Date();
+    return getLocalDateKey(new Date(d.getFullYear(), d.getMonth(), 1));
+  });
+  const [salesRangeEnd, setSalesRangeEnd] = useState(() => {
+    const d = new Date();
+    return getLocalDateKey(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+  });
+  const [salesRepFilter, setSalesRepFilter] = useState('all');
+  const [salesProductFilter, setSalesProductFilter] = useState('all');
+  const [salesTypeFilter, setSalesTypeFilter] = useState('all');
+  const [salesSearch, setSalesSearch] = useState('');
 
   const selectedLead = useMemo(() => leads.find(l => l.id === selectedLeadId), [leads, selectedLeadId]);
 
@@ -575,6 +591,81 @@ export default function App() {
   const totalSales = (rangeAggregated.closes || 0) + (rangeAggregated.fu_closes || 0);
   const closeRatio = totalShows > 0 ? (totalSales / totalShows) * 100 : null;
 
+  // --- All sale-type logs, enriched, for the Sales tab ---
+  const allSaleLogs = useMemo(() => {
+    return activityLogs
+      .filter(log => log.type === 'sale' && log.meta)
+      .map(log => ({
+        ...log,
+        productName: getProductNameFromMeta(log.meta),
+        revenue: Number(log.meta.revenue || 0),
+        collected: Number(log.meta.collected || 0),
+        saleMetric: log.meta.saleMetric || 'closes'
+      }));
+  }, [activityLogs]);
+
+  const filteredSaleLogs = useMemo(() => {
+    const start = new Date(salesRangeStart + 'T00:00:00');
+    const end = new Date(salesRangeEnd + 'T23:59:59');
+    const search = salesSearch.trim().toLowerCase();
+
+    return allSaleLogs.filter(log => {
+      const logDateStr = log.meta?.date || log.date;
+      if (!logDateStr) return false;
+      const logDate = new Date(logDateStr + 'T12:00:00');
+      if (logDate < start || logDate > end) return false;
+
+      if (salesRepFilter !== 'all' && log.rep !== salesRepFilter) return false;
+      if (salesProductFilter !== 'all' && log.meta?.productId !== salesProductFilter) return false;
+      if (salesTypeFilter !== 'all' && log.saleMetric !== salesTypeFilter) return false;
+
+      if (search && !(log.contactName || '').toLowerCase().includes(search)) return false;
+
+      return true;
+    }).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+  }, [allSaleLogs, salesRangeStart, salesRangeEnd, salesRepFilter, salesProductFilter, salesTypeFilter, salesSearch]);
+
+  const salesSummary = useMemo(() => {
+    const count = filteredSaleLogs.length;
+    const revenue = filteredSaleLogs.reduce((sum, l) => sum + l.revenue, 0);
+    const collected = filteredSaleLogs.reduce((sum, l) => sum + l.collected, 0);
+    const avgTicket = count > 0 ? collected / count : null;
+    const collectionPct = revenue > 0 ? (collected / revenue) * 100 : null;
+    const followUpCount = filteredSaleLogs.filter(l => l.saleMetric === 'fu_closes').length;
+
+    return { count, revenue, collected, avgTicket, collectionPct, followUpCount };
+  }, [filteredSaleLogs]);
+
+  const downloadSalesCSV = () => {
+    let csvContent = "Date,Time,Rep,Contact,Product,Sale Type,Revenue,Collected\n";
+
+    filteredSaleLogs.forEach(log => {
+      const dateStr = log.meta?.date || log.date || '';
+      const timeStr = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '';
+      const saleTypeLabel = log.saleMetric === 'fu_closes' ? 'Follow-up Sale' : 'Sale';
+      const row = [
+        dateStr,
+        timeStr,
+        log.rep || '',
+        (log.contactName || '').replace(/,/g, ' '),
+        log.productName.replace(/,/g, ' '),
+        saleTypeLabel,
+        log.revenue,
+        log.collected
+      ];
+      csvContent += row.join(",") + "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `All_Sales_${salesRangeStart}_to_${salesRangeEnd}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const downloadCSV = () => {
     const tableRows = [
       ...KPI_GROUPS.FUNNEL,
@@ -643,6 +734,12 @@ export default function App() {
               Logger
             </button>
             <button
+              onClick={() => setActiveTab('sales')}
+              className={`px-5 py-1.5 rounded-lg font-black uppercase text-[9px] transition-all ${activeTab === 'sales' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
+            >
+              Sales
+            </button>
+            <button
               onClick={() => setActiveTab('dashboard')}
               className={`px-5 py-1.5 rounded-lg font-black uppercase text-[9px] transition-all ${activeTab === 'dashboard' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400'}`}
             >
@@ -670,7 +767,7 @@ export default function App() {
       </header>
 
       <main className="flex-1 overflow-hidden flex relative">
-        {activeTab === 'logger' ? (
+        {activeTab === 'logger' && (
           <>
             <div className="w-80 bg-white border-r border-slate-200 flex flex-col z-10">
               <div className="p-4 border-b border-slate-100 space-y-3">
@@ -893,7 +990,220 @@ export default function App() {
               )}
             </div>
           </>
-        ) : (
+        )}
+
+        {activeTab === 'sales' && (
+          <div className="flex-1 overflow-y-auto p-8 bg-slate-50">
+            <div className="max-w-7xl mx-auto space-y-8">
+              <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+                <div>
+                  <h1 className="text-4xl font-black italic tracking-tighter uppercase flex items-center gap-3">
+                    <Receipt className="text-blue-600" size={32} /> Sales
+                  </h1>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-2">
+                    Every closed deal, all reps, fully detailed
+                  </p>
+                </div>
+
+                <button
+                  onClick={downloadSalesCSV}
+                  className="flex items-center gap-2 bg-slate-900 text-white px-4 py-3 rounded-2xl font-black uppercase text-[9px] hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10 self-start md:self-auto"
+                >
+                  <Download size={14} />
+                  Export CSV
+                </button>
+              </header>
+
+              {/* Filters */}
+              <div className="bg-white p-5 rounded-[28px] border border-slate-200 shadow-sm flex flex-wrap items-end gap-4">
+                <div className="flex items-center gap-2">
+                  <Calendar size={12} className="text-slate-400" />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={salesRangeStart}
+                      onChange={e => setSalesRangeStart(e.target.value)}
+                      className="text-[10px] font-black bg-slate-50 p-2 rounded-lg border border-slate-100"
+                    />
+                    <ArrowRight size={10} className="text-slate-300" />
+                    <input
+                      type="date"
+                      value={salesRangeEnd}
+                      onChange={e => setSalesRangeEnd(e.target.value)}
+                      className="text-[10px] font-black bg-slate-50 p-2 rounded-lg border border-slate-100"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[7px] font-black uppercase text-slate-400">Rep</label>
+                  <select
+                    value={salesRepFilter}
+                    onChange={e => setSalesRepFilter(e.target.value)}
+                    className="text-[10px] font-black bg-slate-50 p-2 rounded-lg border border-slate-100 outline-none uppercase"
+                  >
+                    <option value="all">All Reps</option>
+                    {REPS.map(rep => <option key={rep} value={rep}>{rep}</option>)}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[7px] font-black uppercase text-slate-400">Product</label>
+                  <select
+                    value={salesProductFilter}
+                    onChange={e => setSalesProductFilter(e.target.value)}
+                    className="text-[10px] font-black bg-slate-50 p-2 rounded-lg border border-slate-100 outline-none"
+                  >
+                    <option value="all">All Products</option>
+                    {PRODUCTS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[7px] font-black uppercase text-slate-400">Sale Type</label>
+                  <select
+                    value={salesTypeFilter}
+                    onChange={e => setSalesTypeFilter(e.target.value)}
+                    className="text-[10px] font-black bg-slate-50 p-2 rounded-lg border border-slate-100 outline-none"
+                  >
+                    <option value="all">All Types</option>
+                    <option value="closes">Sale</option>
+                    <option value="fu_closes">Follow-up Sale</option>
+                  </select>
+                </div>
+
+                <div className="relative flex-1 min-w-[180px]">
+                  <label className="text-[7px] font-black uppercase text-slate-400 block mb-1">Contact</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={12} />
+                    <input
+                      type="text"
+                      placeholder="Search contact..."
+                      value={salesSearch}
+                      onChange={e => setSalesSearch(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-100 rounded-lg py-2 pl-9 text-[10px] font-bold outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary */}
+              <div className="flex flex-wrap gap-4 p-5 bg-blue-600 rounded-3xl text-white shadow-xl">
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[8px] font-black text-blue-200 uppercase">Sales Count</p>
+                  <p className="text-3xl font-black">{salesSummary.count}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[8px] font-black text-blue-200 uppercase">Follow-up Sales</p>
+                  <p className="text-3xl font-black">{salesSummary.followUpCount}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[8px] font-black text-blue-200 uppercase">Total Revenue</p>
+                  <p className="text-3xl font-black">${salesSummary.revenue.toLocaleString()}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[8px] font-black text-blue-200 uppercase">Total Collected</p>
+                  <p className="text-3xl font-black">${salesSummary.collected.toLocaleString()}</p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[8px] font-black text-blue-200 uppercase">Avg Ticket</p>
+                  <p className="text-3xl font-black">
+                    {isValidNumber(salesSummary.avgTicket) ? `$${Math.round(salesSummary.avgTicket).toLocaleString()}` : '-'}
+                  </p>
+                </div>
+                <div className="flex-1 min-w-[120px]">
+                  <p className="text-[8px] font-black text-blue-200 uppercase">Collection %</p>
+                  <p className="text-3xl font-black">
+                    {isValidNumber(salesSummary.collectionPct) ? `${Math.round(salesSummary.collectionPct)}%` : '-'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Detailed table */}
+              <div className="bg-white rounded-[32px] border border-slate-200 overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-slate-900 text-white text-[9px] uppercase tracking-wider">
+                        <th className="p-4">Date</th>
+                        <th className="p-4">Time</th>
+                        <th className="p-4">Rep</th>
+                        <th className="p-4">Contact</th>
+                        <th className="p-4">Product</th>
+                        <th className="p-4">Type</th>
+                        <th className="p-4 text-right">Revenue</th>
+                        <th className="p-4 text-right">Collected</th>
+                        <th className="p-4 text-right">Collected %</th>
+                        <th className="p-4"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSaleLogs.length === 0 && (
+                        <tr>
+                          <td colSpan={10} className="p-10 text-center text-slate-300 font-black uppercase tracking-widest text-[10px]">
+                            No sales found for this filter
+                          </td>
+                        </tr>
+                      )}
+                      {filteredSaleLogs.map(log => {
+                        const pct = log.revenue > 0 ? (log.collected / log.revenue) * 100 : null;
+                        return (
+                          <tr key={log.id} className="border-b hover:bg-slate-50 transition-colors group">
+                            <td className="p-4 font-black text-slate-700 whitespace-nowrap">{log.meta?.date || log.date}</td>
+                            <td className="p-4 text-slate-400 font-bold whitespace-nowrap">
+                              {log.timestamp ? new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}
+                            </td>
+                            <td className="p-4">
+                              <span className="text-[8px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 px-2 py-1 rounded-md">
+                                {log.rep || 'No rep'}
+                              </span>
+                            </td>
+                            <td className="p-4 font-black text-slate-800 truncate max-w-[160px]">{log.contactName || 'Unknown'}</td>
+                            <td className="p-4 text-slate-600 font-bold whitespace-nowrap">{log.productName}</td>
+                            <td className="p-4">
+                              <span className={`text-[8px] font-black uppercase tracking-wider px-2 py-1 rounded-md ${log.saleMetric === 'fu_closes' ? 'bg-sky-50 text-sky-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                                {log.saleMetric === 'fu_closes' ? 'Follow-up' : 'Sale'}
+                              </span>
+                            </td>
+                            <td className="p-4 text-right font-black text-slate-700 whitespace-nowrap">${log.revenue.toLocaleString()}</td>
+                            <td className="p-4 text-right font-black text-emerald-600 whitespace-nowrap">${log.collected.toLocaleString()}</td>
+                            <td className="p-4 text-right text-slate-400 font-bold whitespace-nowrap">
+                              {isValidNumber(pct) ? `${Math.round(pct)}%` : '-'}
+                            </td>
+                            <td className="p-4 text-right">
+                              <button
+                                onClick={() => handleDeleteLog(log)}
+                                className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                                disabled={isSaving}
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    {filteredSaleLogs.length > 0 && (
+                      <tfoot>
+                        <tr className="bg-slate-50 font-black text-slate-700 text-[10px]">
+                          <td className="p-4" colSpan={6}>Totals ({salesSummary.count} sales)</td>
+                          <td className="p-4 text-right">${salesSummary.revenue.toLocaleString()}</td>
+                          <td className="p-4 text-right text-emerald-600">${salesSummary.collected.toLocaleString()}</td>
+                          <td className="p-4 text-right text-slate-400">
+                            {isValidNumber(salesSummary.collectionPct) ? `${Math.round(salesSummary.collectionPct)}%` : '-'}
+                          </td>
+                          <td className="p-4"></td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'dashboard' && (
           <div className="flex-1 overflow-y-auto p-8 bg-slate-50">
             <div className="max-w-6xl mx-auto space-y-8">
               <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
