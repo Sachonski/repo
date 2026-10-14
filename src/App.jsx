@@ -66,7 +66,13 @@ const PRODUCTS = [
   { id: 'm597', name: "Monthly $597", price: 597 },
   { id: 'm397', name: "Monthly $397", price: 397 },
   { id: 'm297', name: "Monthly $297", price: 297 },
-  { id: 'm97', name: "Monthly $97", price: 97 }
+  { id: 'm97', name: "Monthly $97", price: 97 },
+  { id: 'p1997', name: "Performance $1997", price: 1997 },
+  { id: 'p1000', name: "2x $1000", price: 1000 },
+  { id: 'p500', name: "4x $500", price: 500 },
+  { id: 'p250', name: "8x $250", price: 250 },
+  
+  
 ];
 
 const KPI_GROUPS = {
